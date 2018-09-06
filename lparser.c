@@ -893,6 +893,14 @@ static void primaryexp (LexState *ls, expdesc *v) {
       singlevar(ls, v);
       return;
     }
+	case '*': {
+	  luaX_next(ls);
+	  expr(ls, v);
+	  v->u.info = luaK_exp2anyreg(ls->fs, v);
+	  v->k = VDEREF;
+	  v->f = v->t = NO_JUMP;
+	  return;
+	}
     default: {
       luaX_syntaxerror(ls, "unexpected symbol");
     }
@@ -946,6 +954,12 @@ void refexp(LexState *ls, expdesc *v)
 	int result = fs->freereg;
 	simpleexp(ls, v, 0);
 	check_condition(ls, vkisvar(v->k), "syntax error");
+
+	if(v->k == VDEREF)
+	{
+		v->k = VNONRELOC;
+		return;
+	}
 
 	int table = fs->freereg++;
 	luaK_codeABC(fs, OP_NEWTABLE, table, 0, 2);
@@ -1334,6 +1348,7 @@ static UnOpr getunopr (int op) {
     case '~': return OPR_BNOT;
     case '#': return OPR_LEN;
 	case '&': return OPR_REF;
+	case '*': return OPR_DEREF;
     default: return OPR_NOUNOPR;
   }
 }
@@ -1398,8 +1413,13 @@ static BinOpr subexpr (LexState *ls, expdesc *v, int limit, int isref) {
   if (uop != OPR_NOUNOPR) {
     int line = ls->linenumber;
     luaX_next(ls);
-    subexpr(ls, v, UNARY_PRIORITY, uop == OPR_REF ? 1 : 0);
-    luaK_prefix(ls->fs, uop, v, line);
+	if(isref && uop == OPR_DEREF) {
+	  subexpr(ls, v, UNARY_PRIORITY, 0);
+	}
+	else {
+	  subexpr(ls, v, UNARY_PRIORITY, uop == OPR_REF ? 1 : 0);
+	  luaK_prefix(ls->fs, uop, v, line);
+	}
   }
   else simpleexp(ls, v, isref);
   /* expand while operators have priorities higher than 'limit' */

@@ -710,6 +710,17 @@ void luaK_dischargevars (FuncState *fs, expdesc *e) {
       luaK_setoneret(fs, e);
       break;
     }
+	case VDEREF:
+	{
+	  e->k = VINDEXSTR;
+	  e->u.ind.t = e->u.info;
+	  e->u.ind.idx = luaK_stringK(fs, luaX_newstring(fs->ls, "get", 3));
+	  int base = luaK_exp2anyreg(fs, e);
+	  e->k = VCALL;
+	  e->u.info = luaK_codeABC(fs, OP_CALL, base, 1, 2);
+	  luaK_dischargevars(fs, e);
+	  break;
+	}
     default: break;  /* there is one value available (somewhere) */
   }
 }
@@ -943,6 +954,29 @@ void luaK_storevar (FuncState *fs, expdesc *var, expdesc *ex) {
       codeABRK(fs, OP_SETTABLE, var->u.ind.t, var->u.ind.idx, ex);
       break;
     }
+	case VDEREF: {
+	  luaK_checkstack(fs, 2);
+	  int level = fs->nactvar;
+	  fs->nactvar = fs->freereg;
+	  expdesc set;
+	  set.k = VINDEXSTR;
+	  set.u.ind.t = var->u.info;
+	  set.u.ind.idx = luaK_stringK(fs, luaX_newstring(fs->ls, "set", 3));
+	  set.t = set.f = NO_JUMP;
+	  luaK_exp2nextreg(fs, &set);
+	  if(vkisinreg(ex->k))
+	  {
+	    luaK_codeABC(fs, OP_MOVE, fs->freereg, ex->u.info, 0);
+	  }else{
+	    expdesc val = *ex;
+	    luaK_exp2nextreg(fs, &val);
+	    freeexp(fs, &val);
+	  }
+	  freeexp(fs, &set);
+	  luaK_codeABC(fs, OP_CALL, set.u.info, 2, 1);
+	  fs->nactvar = level;
+	  break;
+	}
     default: lua_assert(0);  /* invalid var kind to store */
   }
   freeexp(fs, ex);
@@ -1410,6 +1444,12 @@ static void coderef(FuncState *fs, expdesc *e)
 
 }
 
+static void codederef(FuncState *fs, expdesc *e)
+{
+	e->u.info = luaK_exp2anyreg(fs, e);
+	e->k = VDEREF;
+	e->f = e->t = NO_JUMP;
+}
 
 /*
 ** Apply prefix operation 'op' to expression 'e'.
@@ -1426,6 +1466,7 @@ void luaK_prefix (FuncState *fs, UnOpr op, expdesc *e, int line) {
       break;
     case OPR_NOT: codenot(fs, e); break;
 	case OPR_REF: coderef(fs, e); break;
+	case OPR_DEREF: codederef(fs, e); break;
     default: lua_assert(0);
   }
 }

@@ -47,16 +47,17 @@ typedef enum {
   VINDEXSTR, /* indexed variable with literal string;
                 ind.t = table register;
                 ind.idx = key's K index */
+  VDEREF,  /* dereference expression; info = ref register*/
   VJMP,  /* expression is a test/comparison;
             info = pc of corresponding jump instruction */
   VRELOC,  /* expression can put result in any register;
               info = instruction pc */
   VCALL,  /* expression is a function call; info = instruction pc */
-  VVARARG  /* vararg expression; info = instruction pc */
+  VVARARG,  /* vararg expression; info = instruction pc */
 } expkind;
 
 
-#define vkisvar(k)	(VLOCAL <= (k) && (k) <= VINDEXSTR)
+#define vkisvar(k)	(VLOCAL <= (k) && (k) <= VDEREF)
 #define vkisindexed(k)	(VINDEXED <= (k) && (k) <= VINDEXSTR)
 #define vkisinreg(k)	((k) == VNONRELOC || (k) == VLOCAL)
 
