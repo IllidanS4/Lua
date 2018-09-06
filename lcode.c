@@ -1405,6 +1405,11 @@ static void codeeq (FuncState *fs, BinOpr opr, expdesc *e1, expdesc *e2) {
   e1->k = VJMP;
 }
 
+static void coderef(FuncState *fs, expdesc *e)
+{
+
+}
+
 
 /*
 ** Apply prefix operation 'op' to expression 'e'.
@@ -1420,6 +1425,7 @@ void luaK_prefix (FuncState *fs, UnOpr op, expdesc *e, int line) {
       codeunexpval(fs, cast(OpCode, op + OP_UNM), e, line);
       break;
     case OPR_NOT: codenot(fs, e); break;
+	case OPR_REF: coderef(fs, e); break;
     default: lua_assert(0);
   }
 }

@@ -937,10 +937,344 @@ static void suffixedexp (LexState *ls, expdesc *v) {
   }
 }
 
+static void simpleexp(LexState *ls, expdesc *v, int isref);
 
-static void simpleexp (LexState *ls, expdesc *v) {
+void refexp(LexState *ls, expdesc *v)
+{
+	FuncState *fs = ls->fs;
+	int level = fs->nactvar;
+	int result = fs->freereg;
+	simpleexp(ls, v, 0);
+	check_condition(ls, vkisvar(v->k), "syntax error");
+
+	int table = fs->freereg++;
+	luaK_codeABC(fs, OP_NEWTABLE, table, 0, 2);
+	adjustlocalvars(ls, fs->freereg - level);
+
+	expdesc get, set;
+
+	init_exp(&get, VINDEXSTR, 0);
+	get.u.ind.t = table;
+	get.u.ind.idx = luaK_stringK(fs, luaX_newstring(ls, "get", 3));
+
+	init_exp(&set, VINDEXSTR, 0);
+	set.u.ind.t = table;
+	set.u.ind.idx = luaK_stringK(fs, luaX_newstring(ls, "set", 3));
+
+	expdesc tmp, value;
+	init_exp(&value, VNONRELOC, 0);
+
+	TString *n = NULL;
+	switch(v->k)
+	{
+		case VLOCAL:
+		{
+			int i = v->u.info;
+			n = getlocvar(fs, i)->varname;
+			markupval(fs, i);
+		}
+		case VUPVAL:
+		{
+			if(n == NULL)
+			{
+				n = fs->f->upvalues[v->u.info].name;
+			}
+
+			FuncState new_fs;
+			BlockCnt bl;
+
+			new_fs.f = addprototype(ls);
+			new_fs.f->linedefined = ls->linenumber;
+			new_fs.f->lastlinedefined = ls->linenumber;
+			open_func(ls, &new_fs, &bl);
+
+			init_exp(&tmp, VUPVAL, newupvalue(&new_fs, n, v));
+			luaK_ret(&new_fs, luaK_exp2anyreg(&new_fs, &tmp), 1);
+
+			codeclosure(ls, &tmp);
+			close_func(ls);
+
+			luaK_storevar(fs, &get, &tmp);
+
+
+			new_fs.f = addprototype(ls);
+			new_fs.f->linedefined = ls->linenumber;
+			new_fs.f->lastlinedefined = ls->linenumber;
+			open_func(ls, &new_fs, &bl);
+
+			new_localvarliteral(ls, "value");
+			adjustlocalvars(ls, 1);
+			luaK_reserveregs(&new_fs, 1);
+
+			init_exp(&tmp, VUPVAL, newupvalue(&new_fs, n, v));
+			luaK_storevar(&new_fs, &tmp, &value);
+
+			codeclosure(ls, &tmp);
+			close_func(ls);
+
+			luaK_storevar(fs, &set, &tmp);
+			break;
+		}
+		case VINDEXED:
+		{
+			BlockCnt bl;
+			enterblock(fs, &bl, 0);
+			bl.upval = 1;
+
+			init_exp(&tmp, VNONRELOC, v->u.ind.t);
+			new_localvarliteral(ls, "(ref table)");
+			adjust_assign(ls, 1, 1, &tmp);
+			adjustlocalvars(ls, 1);
+			expdesc et;
+			init_exp(&et, VLOCAL, fs->nactvar - 1);
+
+			init_exp(&tmp, VNONRELOC, v->u.ind.idx);
+			new_localvarliteral(ls, "(ref key)");
+			adjust_assign(ls, 1, 1, &tmp);
+			adjustlocalvars(ls, 1);
+			expdesc ekey;
+			init_exp(&ekey, VLOCAL, fs->nactvar - 1);
+
+			FuncState new_fs;
+			BlockCnt bl2;
+			expdesc ut, ukey;
+
+			new_fs.f = addprototype(ls);
+			new_fs.f->linedefined = ls->linenumber;
+			new_fs.f->lastlinedefined = ls->linenumber;
+			open_func(ls, &new_fs, &bl2);
+
+			init_exp(&ut, VUPVAL, newupvalue(&new_fs, getlocvar(fs, et.u.info)->varname, &et));
+			init_exp(&ukey, VUPVAL, newupvalue(&new_fs, getlocvar(fs, ekey.u.info)->varname, &ekey));
+
+			init_exp(&tmp, VINDEXED, 0);
+			tmp.u.ind.t = luaK_exp2anyreg(&new_fs, &ut);
+			tmp.u.ind.idx = luaK_exp2anyreg(&new_fs, &ukey);
+			luaK_ret(&new_fs, luaK_exp2anyreg(&new_fs, &tmp), 1);
+
+			codeclosure(ls, &tmp);
+			close_func(ls);
+
+			luaK_storevar(fs, &get, &tmp);
+
+
+			new_fs.f = addprototype(ls);
+			new_fs.f->linedefined = ls->linenumber;
+			new_fs.f->lastlinedefined = ls->linenumber;
+			open_func(ls, &new_fs, &bl2);
+
+			new_localvarliteral(ls, "value");
+			adjustlocalvars(ls, 1);
+			luaK_reserveregs(&new_fs, 1);
+
+			init_exp(&ut, VUPVAL, newupvalue(&new_fs, getlocvar(fs, et.u.info)->varname, &et));
+			init_exp(&ukey, VUPVAL, newupvalue(&new_fs, getlocvar(fs, ekey.u.info)->varname, &ekey));
+
+			init_exp(&tmp, VINDEXED, 0);
+			tmp.u.ind.t = luaK_exp2anyreg(&new_fs, &ut);
+			tmp.u.ind.idx = luaK_exp2anyreg(&new_fs, &ukey);
+			luaK_storevar(&new_fs, &tmp, &value);
+
+			codeclosure(ls, &tmp);
+			close_func(ls);
+
+			luaK_storevar(fs, &set, &tmp);
+
+			leaveblock(fs);
+			break;
+		}
+		case VINDEXUP:
+		{
+			BlockCnt bl;
+			enterblock(fs, &bl, 0);
+			bl.upval = 1;
+
+			init_exp(&tmp, VUPVAL, v->u.ind.t);
+			new_localvarliteral(ls, "(ref table)");
+			adjust_assign(ls, 1, 1, &tmp);
+			adjustlocalvars(ls, 1);
+			expdesc et;
+			init_exp(&et, VLOCAL, fs->nactvar - 1);
+
+			FuncState new_fs;
+			BlockCnt bl2;
+			expdesc ut;
+
+			new_fs.f = addprototype(ls);
+			new_fs.f->linedefined = ls->linenumber;
+			new_fs.f->lastlinedefined = ls->linenumber;
+			open_func(ls, &new_fs, &bl2);
+
+			init_exp(&ut, VUPVAL, newupvalue(&new_fs, getlocvar(fs, et.u.info)->varname, &et));
+
+			init_exp(&tmp, VINDEXUP, 0);
+			tmp.u.ind.t = ut.u.info;
+			tmp.u.ind.idx = luaK_stringK(&new_fs, tsvalue(&fs->f->k[v->u.ind.idx]));
+			luaK_ret(&new_fs, luaK_exp2anyreg(&new_fs, &tmp), 1);
+
+			codeclosure(ls, &tmp);
+			close_func(ls);
+
+			luaK_storevar(fs, &get, &tmp);
+
+
+			new_fs.f = addprototype(ls);
+			new_fs.f->linedefined = ls->linenumber;
+			new_fs.f->lastlinedefined = ls->linenumber;
+			open_func(ls, &new_fs, &bl2);
+
+			init_exp(&ut, VUPVAL, newupvalue(&new_fs, getlocvar(fs, et.u.info)->varname, &et));
+
+			new_localvarliteral(ls, "value");
+			adjustlocalvars(ls, 1);
+			luaK_reserveregs(&new_fs, 1);
+
+			init_exp(&tmp, VINDEXUP, 0);
+			tmp.u.ind.t = ut.u.info;
+			tmp.u.ind.idx = luaK_stringK(&new_fs, tsvalue(&fs->f->k[v->u.ind.idx]));
+			luaK_storevar(&new_fs, &tmp, &value);
+
+			codeclosure(ls, &tmp);
+			close_func(ls);
+
+			luaK_storevar(fs, &set, &tmp);
+
+			leaveblock(fs);
+			break;
+		}
+		case VINDEXI:
+		{
+			BlockCnt bl;
+			enterblock(fs, &bl, 0);
+			bl.upval = 1;
+
+			init_exp(&tmp, VNONRELOC, v->u.ind.t);
+			new_localvarliteral(ls, "(ref table)");
+			adjust_assign(ls, 1, 1, &tmp);
+			adjustlocalvars(ls, 1);
+			expdesc et;
+			init_exp(&et, VLOCAL, fs->nactvar - 1);
+
+			FuncState new_fs;
+			BlockCnt bl2;
+			expdesc ut;
+
+			new_fs.f = addprototype(ls);
+			new_fs.f->linedefined = ls->linenumber;
+			new_fs.f->lastlinedefined = ls->linenumber;
+			open_func(ls, &new_fs, &bl2);
+
+			init_exp(&ut, VUPVAL, newupvalue(&new_fs, getlocvar(fs, et.u.info)->varname, &et));
+
+			init_exp(&tmp, VINDEXI, 0);
+			tmp.u.ind.t = luaK_exp2anyreg(&new_fs, &ut);
+			tmp.u.ind.idx = v->u.ind.idx;
+			luaK_ret(&new_fs, luaK_exp2anyreg(&new_fs, &tmp), 1);
+
+			codeclosure(ls, &tmp);
+			close_func(ls);
+
+			luaK_storevar(fs, &get, &tmp);
+
+
+			new_fs.f = addprototype(ls);
+			new_fs.f->linedefined = ls->linenumber;
+			new_fs.f->lastlinedefined = ls->linenumber;
+			open_func(ls, &new_fs, &bl2);
+
+			init_exp(&ut, VUPVAL, newupvalue(&new_fs, getlocvar(fs, et.u.info)->varname, &et));
+
+			new_localvarliteral(ls, "value");
+			adjustlocalvars(ls, 1);
+			luaK_reserveregs(&new_fs, 1);
+
+			init_exp(&tmp, VINDEXI, 0);
+			tmp.u.ind.t = luaK_exp2anyreg(&new_fs, &ut);
+			tmp.u.ind.idx = v->u.ind.idx;
+			luaK_storevar(&new_fs, &tmp, &value);
+
+			codeclosure(ls, &tmp);
+			close_func(ls);
+
+			luaK_storevar(fs, &set, &tmp);
+
+			leaveblock(fs);
+			break;
+		}
+		case VINDEXSTR:
+		{
+			BlockCnt bl;
+			enterblock(fs, &bl, 0);
+			bl.upval = 1;
+
+			init_exp(&tmp, VNONRELOC, v->u.ind.t);
+			new_localvarliteral(ls, "(ref table)");
+			adjust_assign(ls, 1, 1, &tmp);
+			adjustlocalvars(ls, 1);
+			expdesc et;
+			init_exp(&et, VLOCAL, fs->nactvar - 1);
+
+			FuncState new_fs;
+			BlockCnt bl2;
+			expdesc ut;
+
+			new_fs.f = addprototype(ls);
+			new_fs.f->linedefined = ls->linenumber;
+			new_fs.f->lastlinedefined = ls->linenumber;
+			open_func(ls, &new_fs, &bl2);
+
+			init_exp(&ut, VUPVAL, newupvalue(&new_fs, getlocvar(fs, et.u.info)->varname, &et));
+
+			init_exp(&tmp, VINDEXUP, 0);
+			tmp.u.ind.t = ut.u.info;
+			tmp.u.ind.idx = luaK_stringK(&new_fs, tsvalue(&fs->f->k[v->u.ind.idx]));
+			luaK_ret(&new_fs, luaK_exp2anyreg(&new_fs, &tmp), 1);
+
+			codeclosure(ls, &tmp);
+			close_func(ls);
+
+			luaK_storevar(fs, &get, &tmp);
+
+
+			new_fs.f = addprototype(ls);
+			new_fs.f->linedefined = ls->linenumber;
+			new_fs.f->lastlinedefined = ls->linenumber;
+			open_func(ls, &new_fs, &bl2);
+
+			init_exp(&ut, VUPVAL, newupvalue(&new_fs, getlocvar(fs, et.u.info)->varname, &et));
+
+			new_localvarliteral(ls, "value");
+			adjustlocalvars(ls, 1);
+			luaK_reserveregs(&new_fs, 1);
+
+			init_exp(&tmp, VINDEXUP, 0);
+			tmp.u.ind.t = ut.u.info;
+			tmp.u.ind.idx = luaK_stringK(&new_fs, tsvalue(&fs->f->k[v->u.ind.idx]));
+			luaK_storevar(&new_fs, &tmp, &value);
+
+			codeclosure(ls, &tmp);
+			close_func(ls);
+
+			luaK_storevar(fs, &set, &tmp);
+
+			leaveblock(fs);
+			break;
+		}
+	}
+
+	fs->nactvar = level;
+	luaK_codeABC(fs, OP_MOVE, result, table, 0);
+	fs->freereg = result + 1;
+	init_exp(v, VNONRELOC, result);
+}
+
+static void simpleexp (LexState *ls, expdesc *v, int isref) {
   /* simpleexp -> FLT | INT | STRING | NIL | TRUE | FALSE | ... |
                   constructor | FUNCTION body | suffixedexp */
+  if(isref) {
+	refexp(ls, v);
+	return;
+  }
   switch (ls->t.token) {
     case TK_FLT: {
       init_exp(v, VKFLT, 0);
@@ -999,6 +1333,7 @@ static UnOpr getunopr (int op) {
     case '-': return OPR_MINUS;
     case '~': return OPR_BNOT;
     case '#': return OPR_LEN;
+	case '&': return OPR_REF;
     default: return OPR_NOUNOPR;
   }
 }
@@ -1055,7 +1390,7 @@ static const struct {
 ** subexpr -> (simpleexp | unop subexpr) { binop subexpr }
 ** where 'binop' is any binary operator with a priority higher than 'limit'
 */
-static BinOpr subexpr (LexState *ls, expdesc *v, int limit) {
+static BinOpr subexpr (LexState *ls, expdesc *v, int limit, int isref) {
   BinOpr op;
   UnOpr uop;
   enterlevel(ls);
@@ -1063,10 +1398,10 @@ static BinOpr subexpr (LexState *ls, expdesc *v, int limit) {
   if (uop != OPR_NOUNOPR) {
     int line = ls->linenumber;
     luaX_next(ls);
-    subexpr(ls, v, UNARY_PRIORITY);
+    subexpr(ls, v, UNARY_PRIORITY, uop == OPR_REF ? 1 : 0);
     luaK_prefix(ls->fs, uop, v, line);
   }
-  else simpleexp(ls, v);
+  else simpleexp(ls, v, isref);
   /* expand while operators have priorities higher than 'limit' */
   op = getbinopr(ls->t.token);
   while (op != OPR_NOBINOPR && priority[op].left > limit) {
@@ -1076,7 +1411,7 @@ static BinOpr subexpr (LexState *ls, expdesc *v, int limit) {
     luaX_next(ls);
     luaK_infix(ls->fs, op, v);
     /* read sub-expression with higher priority */
-    nextop = subexpr(ls, &v2, priority[op].right);
+    nextop = subexpr(ls, &v2, priority[op].right, 0);
     luaK_posfix(ls->fs, op, v, &v2, line);
     op = nextop;
   }
@@ -1086,7 +1421,7 @@ static BinOpr subexpr (LexState *ls, expdesc *v, int limit) {
 
 
 static void expr (LexState *ls, expdesc *v) {
-  subexpr(ls, v, 0);
+  subexpr(ls, v, 0, 0);
 }
 
 /* }==================================================================== */
