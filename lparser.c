@@ -1128,9 +1128,11 @@ static void refexp(LexState *ls, expdesc *v)
 	{
 		case VLOCAL:
 		{
+			/* cache the name and mark the block as containing upvalues */
 			int i = v->u.info;
 			n = getlocvar(fs, i)->varname;
 			markupval(fs, i);
+			/* same as for upvalue */
 		}
 		case VUPVAL:
 		{
@@ -1185,16 +1187,27 @@ static void refexp(LexState *ls, expdesc *v)
 		}
 		default:
 		{
+			/* if the table/key is an upvalue or a local variable, copy its value in a register */
 			expdesc et;
 			init_exp(&et, v->k == VINDEXUP ? VUPVAL : VNONRELOC, v->u.ind.t);
-			luaK_dischargevars(fs, &et);
+			if(et.k != VNONRELOC || et.u.info < fs->nactvar)
+			{
+				luaK_exp2nextreg(fs, &et);
+			}
+			et.k = VLOCAL;
 
 			expdesc ekey;
 			if(v->k == VINDEXED)
 			{
 				init_exp(&ekey, VNONRELOC, v->u.ind.idx);
-				luaK_dischargevars(fs, &ekey);
+				if(ekey.k != VNONRELOC || ekey.u.info < fs->nactvar)
+				{
+					luaK_exp2nextreg(fs, &ekey);
+				}
+				ekey.k = VLOCAL;
 			}
+			/* treating it as VLOCAL for newupvalue */
+
 			FuncState new_fs;
 			BlockCnt bl2;
 			expdesc ut, ukey;
