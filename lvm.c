@@ -1584,7 +1584,7 @@ void luaV_execute (lua_State *L, CallInfo *ci) {
           b++;  /* there is now one extra argument */
         }
         if (!ttisLclosure(s2v(ra))) {  /* C function? */
-          luaD_call(L, ra, LUA_MULTRET);  /* call it */
+          luaD_call(L, ra, ci->nresults);  /* call it */
           updatetrap(ci);
           if (trap) {  /* stack may have been relocated */
             updatebase(ci);
